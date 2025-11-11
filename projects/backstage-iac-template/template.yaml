@@ -1,0 +1,146 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: iac-template
+  title: IaC Project Template
+  description: |
+    A standardized and minimal template to bootstrap Infrastructure-as-Code (IaC) projects using Terraform/OpenTofu.
+    This template is designed to help teams quickly set up a new IaC project with best practices in mind.
+    It includes a basic directory structure, example Terraform code, and configuration files to get you started.
+    The template is designed to be easily customizable to fit your specific needs and requirements.
+
+spec:
+  owner: cloud-automation
+  type: service
+
+  parameters:
+    - title: Project Information
+      required:
+        - name
+        - awsRegion
+        - cloudProvider
+        - iacTool
+      properties:
+        name:
+          title: Name
+          type: string
+          description: Unique name of the component
+        cloudProvider:
+          type: string
+          title: Cloud Provider
+          enum: [aws, azure, gcp]
+        awsRegion:
+          title: AWS Region
+          type: string
+          default: us-east-1
+        # region:
+        #   type: string
+        #   title: Default Region
+        #   description: Default region for the IaC project
+        #   enum: [us-east-1, us-west-1, eu-west-1, ap-southeast-1]
+        #   default: us-east-1
+        iacTool:
+          title: IaC Tool
+          type: string
+          description: Which IaC tool do you want to use? Terraform or OpenTofu?
+          enum:
+            - terraform
+            - opentofu
+
+    - title: Choose a location
+      required:
+        - owner
+        - system
+      properties:
+        owner:
+          title: Github teams
+          type: string
+          description: Owner of the App
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: Group
+        system:
+          title: System
+          type: string
+          description: Systems of the component
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: System
+            defaultKind: System
+        repoHost:
+          title: Repository Host
+          type: string
+          default: github.kyndryl.net
+        repoOrg:
+          type: string
+          ui:widget: hidden
+        domain:
+          title: Department
+          type: string
+          description: Domain name
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: Domain
+            defaultKind: Domain 
+
+  # Here's the steps that are executed in series in the scaffolder backend
+  steps:
+    # Each step executes an action, in this case one templates files into the working directory.
+    - id: fetch-terraform-code
+      name: Fetch Terraform Code
+      action: fetch:template
+      input:
+        url: ./content
+        values:
+          name: ${{ parameters.name }}
+          repoHost: ${{ parameters.repoHost }}
+          repoOrg: ${{ (parameters.owner | parseEntityRef).namespace }}
+          system: ${{ parameters.system }}
+          owner: ${{ parameters.owner }}
+          domain: ${{ (parameters.domain | parseEntityRef).name }}
+          cloudProvider: ${{ parameters.cloudProvider }}
+          awsRegion: ${{ parameters.awsRegion }}
+          iacTool: ${{ parameters.iacTool }}
+      logOutput: true
+
+    # This step publishes the contents of the working directory to GitHub.
+    - id: publish
+      name: Publish
+      action: publish:github
+      input:
+        allowedHosts: ["github.kyndryl.net"]
+        description: This is ${{ parameters.name }}
+        repoUrl: ${{ parameters.repoHost }}?owner=${{ (parameters.owner | parseEntityRef).namespace }}&repo=${{ parameters.name }}
+        branchName: add-codeowners-${{ '' | now }}
+        requireCodeOwnerReviews: true
+        repoVisibility: private
+        defaultBranch: develop
+        requireBranchesToBeUpToDate: true
+        protectDefaultBranch: true
+        allowRebaseMerge: false
+        access: '${{ (parameters.owner | parseEntityRef).namespace }}/${{ (parameters.owner | parseEntityRef).name }}'
+        collaborators:
+          - team: '${{ (parameters.owner | parseEntityRef).namespace }}/${{ (gi.owner | parseEntityRef).name }}'
+            access: write
+      logOutput: true
+
+    # The final step is to register our new component in the catalog.
+    - id: register
+      name: Register
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+      logOutput: true
+
+  # Outputs are displayed to the user after a successful execution of the template.
+  output:
+    links:
+      - title: Repository
+        url: ${{ steps['publish'].output.remoteUrl }}
+      - title: Open in catalog
+        icon: catalog
+        entityRef: ${{ steps['register'].output.entityRef }}
